@@ -1,3 +1,4 @@
 requests
 pycaw
 comtypes
+pyinstaller
