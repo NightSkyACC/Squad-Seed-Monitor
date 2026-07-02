@@ -41,6 +41,8 @@ If you want to run the raw Python code or configure this tool for your own commu
    `pip install -r requirements.txt`
 3. Run the script:
    `python "Squad seed monitor.py"`
+4. To compile your own .exe (ensure 20r_logo.ico/YOUR_LOGO is in the same folder):
+ `python -m PyInstaller --clean --onefile --windowed --icon="20r_logo.ico" ".\squad_seed_monitor"`
 
 **Customizing for Your Server:**
 Open the Python file and edit the variables at the top of the script to match your community:
