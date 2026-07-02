@@ -37,4 +37,6 @@ Open the Python file and edit the variables at the top of the script to match yo
 * `TARGET_PLAYERS`: Change the default threshold.
 
 ## Screenshot of the program
-<img width="442" height="476" alt="image" src="https://github.com/user-attachments/assets/c86d10e4-794e-4aaa-a23d-f6d38a249c72" />
+<img width="542" height="682" alt="image" src="https://github.com/user-attachments/assets/4d8e78ef-3482-48bc-ba28-31c9b029eb93" />
+
+
