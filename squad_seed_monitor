@@ -1,0 +1,132 @@
+import tkinter as tk
+import requests
+import webbrowser
+import os
+
+# --- Configuration ---
+API_URL = "https://api.battlemetrics.com/servers/30558421"
+JOIN_URL = "https://jtp27622.pythonanywhere.com/join?id=109775241595442380"
+TARGET_PLAYERS = 85
+BG_COLOR = "#4a235a"  # Dark purple background
+TEXT_COLOR = "white"
+
+class SeedTrackerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("SquadSeed Monitor")
+        self.root.geometry("450x450")
+        self.root.configure(bg=BG_COLOR)
+
+        self.selected_action = tk.StringVar(value="Kill Process")
+        self.time_left = 60
+        self.is_running = True
+
+        self.setup_ui()
+        self.check_api() # Run first check immediately
+        self.countdown() # Start the 60s loop
+
+    def setup_ui(self):
+        # Server Name Title
+        tk.Label(self.root, text="20R Gaming | Stat Tracking | Discord.gg/20R", 
+                 font=("Segoe UI", 12, "bold"), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(20, 10))
+
+        # Join Server Button
+        tk.Button(self.root, text="Join Server", font=("Segoe UI", 10, "bold"), 
+                  bg="#3498db", fg="white", relief="flat", padx=10, pady=5,
+                  command=lambda: webbrowser.open(JOIN_URL)).pack(pady=5)
+
+        # Big Player Count Number
+        self.lbl_players = tk.Label(self.root, text="--", font=("Segoe UI", 65, "bold"), bg=BG_COLOR, fg=TEXT_COLOR)
+        self.lbl_players.pack(pady=5)
+
+        # Target Label
+        tk.Label(self.root, text=f"Target: > {TARGET_PLAYERS} players", 
+                 font=("Segoe UI", 11), bg=BG_COLOR, fg=TEXT_COLOR).pack()
+
+        # Status Label
+        self.lbl_status = tk.Label(self.root, text="Status: checking...", 
+                                   font=("Segoe UI", 10), bg=BG_COLOR, fg="#2ecc71")
+        self.lbl_status.pack(pady=2)
+
+        # Countdown Timer Label
+        self.lbl_timer = tk.Label(self.root, text="Next check in -- s", 
+                                  font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR)
+        self.lbl_timer.pack(pady=2)
+
+        # Action Buttons Area
+        tk.Label(self.root, text="When threshold is reached:", 
+                 font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(20, 5))
+        
+        action_frame = tk.Frame(self.root, bg=BG_COLOR)
+        action_frame.pack()
+
+        self.btn_nothing = tk.Button(action_frame, text="Do Nothing", width=12, relief="flat", font=("Segoe UI", 9, "bold"), command=lambda: self.set_action("Do Nothing"))
+        self.btn_nothing.grid(row=0, column=0, padx=5)
+
+        self.btn_kill = tk.Button(action_frame, text="Kill Process", width=12, relief="flat", font=("Segoe UI", 9, "bold"), command=lambda: self.set_action("Kill Process"))
+        self.btn_kill.grid(row=0, column=1, padx=5)
+
+        self.btn_shutdown = tk.Button(action_frame, text="Shutdown PC", width=12, relief="flat", font=("Segoe UI", 9, "bold"), command=lambda: self.set_action("Shutdown PC"))
+        self.btn_shutdown.grid(row=0, column=2, padx=5)
+
+        self.set_action("Kill Process") # Set default button colors
+
+    def set_action(self, action):
+        self.selected_action.set(action)
+        
+        # Reset all buttons to gray
+        self.btn_nothing.config(bg="#34495e", fg="white")
+        self.btn_kill.config(bg="#34495e", fg="white")
+        self.btn_shutdown.config(bg="#34495e", fg="white")
+        
+        # Highlight the clicked button green
+        if action == "Do Nothing": self.btn_nothing.config(bg="#2ecc71", fg="black")
+        elif action == "Kill Process": self.btn_kill.config(bg="#2ecc71", fg="black")
+        elif action == "Shutdown PC": self.btn_shutdown.config(bg="#2ecc71", fg="black")
+
+    def check_api(self):
+        if not self.is_running: return
+        try:
+            response = requests.get(API_URL, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                players = data['data']['attributes']['players']
+                self.lbl_players.config(text=str(players))
+                self.lbl_status.config(text="Status: online", fg="#2ecc71")
+                
+                if players >= TARGET_PLAYERS:
+                    self.trigger_action()
+            else:
+                self.lbl_status.config(text="Status: error", fg="#e74c3c")
+        except Exception:
+            self.lbl_status.config(text="Status: offline", fg="#e74c3c")
+        
+        self.time_left = 60 # Reset the countdown
+
+    def countdown(self):
+        if not self.is_running: return
+        
+        self.lbl_timer.config(text=f"Next check in {self.time_left} s")
+        if self.time_left <= 0:
+            self.check_api()
+        else:
+            self.time_left -= 1
+            
+        # Loop this function every 1000ms (1 second)
+        self.root.after(1000, self.countdown)
+
+    def trigger_action(self):
+        self.is_running = False
+        self.lbl_timer.config(text="THRESHOLD REACHED!", fg="#f1c40f")
+        self.lbl_status.config(text="Executing Action...", fg="#f1c40f")
+        
+        action = self.selected_action.get()
+        if action == "Kill Process":
+            os.system("taskkill /F /IM SquadGame.exe")
+        elif action == "Shutdown PC":
+            os.system("shutdown /s /t 10")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = SeedTrackerApp(root)
+    root.mainloop()
