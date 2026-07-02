@@ -1,61 +1,139 @@
 import tkinter as tk
+from tkinter import filedialog
 import requests
 import webbrowser
 import os
+import ctypes
+import shutil
+from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+
+# --- Windows High DPI Fix ---
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
 
 # --- Configuration ---
 API_URL = "https://api.battlemetrics.com/servers/30558421"
 JOIN_URL = "https://jtp27622.pythonanywhere.com/join?id=109775241595442380"
+DISCORD_URL = "https://discord.gg/20R"
 TARGET_PLAYERS = 85
-BG_COLOR = "#4a235a"  # Dark purple background
+BG_COLOR = "#4a235a"
 TEXT_COLOR = "white"
 
 class SeedTrackerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SquadSeed Monitor")
-        self.root.geometry("450x450")
+        self.root.title("20R Gaming | Stat Tracking | Discord.gg/20R")
+        self.root.geometry("540x670")
         self.root.configure(bg=BG_COLOR)
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.selected_action = tk.StringVar(value="Kill Process")
+        self.selected_res = tk.StringVar(value="1024x768")
+        self.selected_fps = tk.StringVar(value="30")
+        
         self.time_left = 60
         self.is_running = True
+        
+        self.backup_ini_path = None
+        self.cleanup_orphan_backups()
 
         self.setup_ui()
-        self.check_api() # Run first check immediately
-        self.countdown() # Start the 60s loop
+        self.check_api()
+        self.countdown()
+
+    def cleanup_orphan_backups(self):
+        paths = [
+            os.path.join(os.environ['LOCALAPPDATA'], 'SquadGame', 'Saved', 'Config', 'WindowsNoEditor', 'GameUserSettings.ini.backup'),
+            os.path.join(os.environ['LOCALAPPDATA'], 'Squad', 'Saved', 'Config', 'WindowsNoEditor', 'GameUserSettings.ini.backup'),
+            os.path.join(os.environ['LOCALAPPDATA'], 'SquadGame', 'Saved', 'Config', 'Windows', 'GameUserSettings.ini.backup')
+        ]
+        for bp in paths:
+            if os.path.exists(bp):
+                original = bp.replace('.backup', '')
+                try:
+                    shutil.copy2(bp, original)
+                    os.remove(bp)
+                except:
+                    pass
 
     def setup_ui(self):
-        # Server Name Title
         tk.Label(self.root, text="20R Gaming | Stat Tracking | Discord.gg/20R", 
-                 font=("Segoe UI", 12, "bold"), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(20, 10))
+                 font=("Segoe UI", 12, "bold"), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(15, 5))
 
-        # Join Server Button
-        tk.Button(self.root, text="Join Server", font=("Segoe UI", 10, "bold"), 
-                  bg="#3498db", fg="white", relief="flat", padx=10, pady=5,
-                  command=lambda: webbrowser.open(JOIN_URL)).pack(pady=5)
+        self.btn_autoseed = tk.Button(self.root, text="🚀 1-Click Auto-Seed Sequence", 
+                                      font=("Segoe UI", 13, "bold"), bg="#27ae60", fg="white", 
+                                      relief="flat", command=self.start_autoseed)
+        self.btn_autoseed.pack(pady=(5, 0), fill=tk.X, padx=30)
+        
+        tk.Label(self.root, text="* You must physically click the screen once to skip the game intro *", 
+                 font=("Segoe UI", 8, "italic"), bg=BG_COLOR, fg="#bdc3c7").pack(pady=(2, 5))
 
-        # Big Player Count Number
+        btn_frame = tk.Frame(self.root, bg=BG_COLOR)
+        btn_frame.pack(pady=5)
+
+        tk.Button(btn_frame, text="Manual Launch", font=("Segoe UI", 8, "bold"), 
+                  bg="#95a5a6", fg="black", relief="flat", width=14,
+                  command=lambda: webbrowser.open("steam://rungameid/393380")).grid(row=0, column=0, padx=5)
+
+        tk.Button(btn_frame, text="Manual Join", font=("Segoe UI", 8, "bold"), 
+                  bg="#3498db", fg="white", relief="flat", width=14,
+                  command=lambda: webbrowser.open(JOIN_URL)).grid(row=0, column=1, padx=5)
+                  
+        tk.Button(btn_frame, text="Discord", font=("Segoe UI", 8, "bold"), 
+                  bg="#7289da", fg="white", relief="flat", width=14,
+                  command=lambda: webbrowser.open(DISCORD_URL)).grid(row=0, column=2, padx=5)
+
         self.lbl_players = tk.Label(self.root, text="--", font=("Segoe UI", 65, "bold"), bg=BG_COLOR, fg=TEXT_COLOR)
         self.lbl_players.pack(pady=5)
 
-        # Target Label
         tk.Label(self.root, text=f"Target: > {TARGET_PLAYERS} players", 
                  font=("Segoe UI", 11), bg=BG_COLOR, fg=TEXT_COLOR).pack()
 
-        # Status Label
         self.lbl_status = tk.Label(self.root, text="Status: checking...", 
                                    font=("Segoe UI", 10), bg=BG_COLOR, fg="#2ecc71")
         self.lbl_status.pack(pady=2)
 
-        # Countdown Timer Label
         self.lbl_timer = tk.Label(self.root, text="Next check in -- s", 
                                   font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR)
         self.lbl_timer.pack(pady=2)
 
+        # --- Seeding Tools Section ---
+        tk.Label(self.root, text="Seeding Optimization Tools:", 
+                 font=("Segoe UI", 10, "bold"), bg=BG_COLOR, fg="#f1c40f").pack(pady=(15, 2))
+        
+        # ---> THE MISSING TEXT <---
+        tk.Label(self.root, text="* Apply Config BEFORE launching | Mute AFTER game is open *", 
+                 font=("Segoe UI", 9, "italic"), bg=BG_COLOR, fg="#bdc3c7").pack(pady=(0, 5))
+        # --------------------------
+
+        tools_frame = tk.Frame(self.root, bg=BG_COLOR)
+        tools_frame.pack()
+
+        self.btn_mute = tk.Button(tools_frame, text="Mute Audio", width=12, relief="flat", font=("Segoe UI", 8, "bold"), bg="#95a5a6", fg="black", command=self.mute_squad)
+        self.btn_mute.grid(row=0, column=0, padx=5, pady=2)
+
+        config_frame = tk.Frame(tools_frame, bg=BG_COLOR)
+        config_frame.grid(row=0, column=1, padx=5, pady=2)
+
+        res_opts = ["1024x768", "1280x720", "1600x900", "1920x1080"]
+        opt_res = tk.OptionMenu(config_frame, self.selected_res, *res_opts)
+        opt_res.config(bg="#95a5a6", fg="black", font=("Segoe UI", 8, "bold"), relief="flat", highlightthickness=0)
+        opt_res.pack(side=tk.LEFT, padx=2)
+
+        fps_opts = ["5", "15", "30", "60", "120", "144"] 
+        opt_fps = tk.OptionMenu(config_frame, self.selected_fps, *fps_opts)
+        opt_fps.config(bg="#95a5a6", fg="black", font=("Segoe UI", 8, "bold"), relief="flat", highlightthickness=0)
+        opt_fps.pack(side=tk.LEFT, padx=2)
+
+        self.btn_fps = tk.Button(config_frame, text="Apply", width=8, relief="flat", font=("Segoe UI", 8, "bold"), bg="#95a5a6", fg="black", command=self.apply_seed_settings)
+        self.btn_fps.pack(side=tk.LEFT, padx=2)
+
         # Action Buttons Area
         tk.Label(self.root, text="When threshold is reached:", 
-                 font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(20, 5))
+                 font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(15, 5))
         
         action_frame = tk.Frame(self.root, bg=BG_COLOR)
         action_frame.pack()
@@ -69,17 +147,137 @@ class SeedTrackerApp:
         self.btn_shutdown = tk.Button(action_frame, text="Shutdown PC", width=12, relief="flat", font=("Segoe UI", 9, "bold"), command=lambda: self.set_action("Shutdown PC"))
         self.btn_shutdown.grid(row=0, column=2, padx=5)
 
-        self.set_action("Kill Process") # Set default button colors
+        self.set_action("Kill Process")
+
+    def start_autoseed(self):
+        self.btn_autoseed.config(state=tk.DISABLED, text="Step 1: Applying Settings...", bg="#f39c12")
+        self.apply_seed_settings()
+        self.root.after(1500, self.autoseed_step2)
+
+    def autoseed_step2(self):
+        self.btn_autoseed.config(text="Step 2: Launching Game...")
+        webbrowser.open("steam://rungameid/393380")
+        self.poll_audio_attempts = 0
+        self.root.after(3000, self.autoseed_poll_audio)
+
+    def autoseed_poll_audio(self):
+        try:
+            sessions = AudioUtilities.GetAllSessions()
+            muted = False
+            for session in sessions:
+                volume = session._ctl.QueryInterface(ISimpleAudioVolume)
+                if session.Process and session.Process.name() == "SquadGame-Win64-Shipping.exe":
+                    volume.SetMute(1, None)
+                    muted = True
+            
+            if muted:
+                self.btn_autoseed.config(text="Game Booted & Muted! Waiting 15s...")
+                self.btn_mute.config(bg="#2ecc71", text="Game Muted!")
+                self.root.after(15000, self.autoseed_step3)
+            else:
+                self.poll_audio_attempts += 1
+                if self.poll_audio_attempts > 60: 
+                    self.btn_autoseed.config(text="Error: Game took too long", bg="#e74c3c")
+                    return
+                self.btn_autoseed.config(text=f"Waiting for Game to boot... ({self.poll_audio_attempts})")
+                self.root.after(3000, self.autoseed_poll_audio)
+        except Exception:
+            self.root.after(3000, self.autoseed_poll_audio)
+
+    def autoseed_step3(self):
+        self.btn_autoseed.config(text="Step 3: Connecting to Server...", bg="#3498db")
+        webbrowser.open(JOIN_URL)
+        self.root.after(4000, lambda: self.btn_autoseed.config(text="🚀 Sequence Complete!", bg="#2ecc71"))
+
+    def mute_squad(self):
+        try:
+            sessions = AudioUtilities.GetAllSessions()
+            muted = False
+            for session in sessions:
+                volume = session._ctl.QueryInterface(ISimpleAudioVolume)
+                if session.Process and session.Process.name() == "SquadGame-Win64-Shipping.exe":
+                    volume.SetMute(1, None)
+                    muted = True
+            
+            if muted:
+                self.btn_mute.config(bg="#2ecc71", text="Game Muted!")
+            else:
+                self.btn_mute.config(bg="#e74c3c", text="Game Not Found")
+        except Exception as e:
+            print(f"Audio error: {e}")
+
+    def apply_seed_settings(self):
+        try:
+            path1 = os.path.join(os.environ['LOCALAPPDATA'], 'SquadGame', 'Saved', 'Config', 'WindowsNoEditor', 'GameUserSettings.ini')
+            path2 = os.path.join(os.environ['LOCALAPPDATA'], 'Squad', 'Saved', 'Config', 'WindowsNoEditor', 'GameUserSettings.ini')
+            path3 = os.path.join(os.environ['LOCALAPPDATA'], 'SquadGame', 'Saved', 'Config', 'Windows', 'GameUserSettings.ini')
+            
+            ini_path = None
+            if os.path.exists(path1):
+                ini_path = path1
+            elif os.path.exists(path2):
+                ini_path = path2
+            elif os.path.exists(path3):
+                ini_path = path3
+                
+            if not ini_path:
+                self.btn_fps.config(bg="#f39c12", text="Select Config...")
+                ini_path = filedialog.askopenfilename(
+                    title="Find GameUserSettings.ini",
+                    filetypes=[("INI files", "*.ini")],
+                    initialdir=os.environ['LOCALAPPDATA']
+                )
+                if not ini_path:
+                    self.btn_fps.config(bg="#e74c3c", text="Not Found")
+                    return
+
+            if not self.backup_ini_path:
+                self.backup_ini_path = ini_path + ".backup"
+                if os.path.exists(ini_path):
+                    shutil.copy2(ini_path, self.backup_ini_path)
+
+            target_res = self.selected_res.get()
+            target_fps = self.selected_fps.get()
+            res_x, res_y = target_res.split('x')
+
+            with open(ini_path, 'r') as f:
+                lines = f.readlines()
+
+            with open(ini_path, 'w') as f:
+                for line in lines:
+                    if line.startswith('ResolutionSizeX=') or line.startswith('LastUserConfirmedResolutionSizeX='):
+                        f.write(line.split('=')[0] + f'={res_x}\n')
+                    elif line.startswith('ResolutionSizeY=') or line.startswith('LastUserConfirmedResolutionSizeY='):
+                        f.write(line.split('=')[0] + f'={res_y}\n')
+                    elif line.startswith('FrameRateLimit='):
+                        f.write(f'FrameRateLimit={target_fps}.000000\n')
+                    else:
+                        f.write(line)
+            
+            self.btn_fps.config(bg="#2ecc71", text="Applied!")
+        except Exception as e:
+            print(f"Config error: {e}")
+
+    def restore_settings(self):
+        if hasattr(self, 'backup_ini_path') and self.backup_ini_path and os.path.exists(self.backup_ini_path):
+            try:
+                original_path = self.backup_ini_path.replace('.backup', '')
+                shutil.copy2(self.backup_ini_path, original_path)
+                os.remove(self.backup_ini_path)
+                print("Original graphics settings restored.")
+            except Exception as e:
+                print(f"Restore failed: {e}")
+
+    def on_closing(self):
+        self.restore_settings()
+        self.root.destroy()
 
     def set_action(self, action):
         self.selected_action.set(action)
-        
-        # Reset all buttons to gray
         self.btn_nothing.config(bg="#34495e", fg="white")
         self.btn_kill.config(bg="#34495e", fg="white")
         self.btn_shutdown.config(bg="#34495e", fg="white")
         
-        # Highlight the clicked button green
         if action == "Do Nothing": self.btn_nothing.config(bg="#2ecc71", fg="black")
         elif action == "Kill Process": self.btn_kill.config(bg="#2ecc71", fg="black")
         elif action == "Shutdown PC": self.btn_shutdown.config(bg="#2ecc71", fg="black")
@@ -101,7 +299,7 @@ class SeedTrackerApp:
         except Exception:
             self.lbl_status.config(text="Status: offline", fg="#e74c3c")
         
-        self.time_left = 60 # Reset the countdown
+        self.time_left = 60
 
     def countdown(self):
         if not self.is_running: return
@@ -112,13 +310,14 @@ class SeedTrackerApp:
         else:
             self.time_left -= 1
             
-        # Loop this function every 1000ms (1 second)
         self.root.after(1000, self.countdown)
 
     def trigger_action(self):
         self.is_running = False
         self.lbl_timer.config(text="THRESHOLD REACHED!", fg="#f1c40f")
         self.lbl_status.config(text="Executing Action...", fg="#f1c40f")
+        
+        self.restore_settings()
         
         action = self.selected_action.get()
         if action == "Kill Process":
