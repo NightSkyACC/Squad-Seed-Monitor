@@ -51,5 +51,5 @@ Open the Python file and edit the variables at the top of the script to match yo
  <img width="542" height="702" alt="image" src="https://github.com/user-attachments/assets/86b65744-985a-443e-95f3-7ac3b360bbfd" />
 
 ## MIT License
-   MIT License — see **[LICENSE](https://github.com/NightSkyACC/Squad-Seed-Monitor/blob/main/LICENSE))** 
+   MIT License — see **[LICENSE](https://github.com/NightSkyACC/Squad-Seed-Monitor/blob/main/LICENSE)** 
 
