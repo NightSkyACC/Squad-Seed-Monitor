@@ -122,7 +122,7 @@ class SeedTrackerApp:
         
         action = self.selected_action.get()
         if action == "Kill Process":
-            os.system("taskkill /F /IM SquadGame.exe")
+            os.system("taskkill /F /IM SquadGame-Win64-Shipping.exe")
         elif action == "Shutdown PC":
             os.system("shutdown /s /t 10")
 
