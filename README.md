@@ -24,7 +24,7 @@ If you want to run the raw Python code or configure this tool for your own commu
 
 **Installation:**
 1. Clone this repository:
-   `git clone https://github.com/YOUR-USERNAME/squad-seed-monitor.git`
+   `git clone https://github.com/NightSkyACC/squad-seed-monitor.git`
 2. Install the required dependency:
    `pip install -r requirements.txt`
 3. Run the script:
