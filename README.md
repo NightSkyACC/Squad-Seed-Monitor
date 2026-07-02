@@ -48,7 +48,7 @@ If you want to run the raw Python code or configure this tool for your own commu
 Open the Python file and edit the variables at the top of the script to match your community:
 * `API_URL`: Replace with your server's BattleMetrics API link.
 * `JOIN_URL`: Replace with your community's direct connect link.
-* `DISCORD_URL`:: Replace with your community Discord invite.
+* `DISCORD_URL`: Replace with your community Discord invite.
 * `TARGET_PLAYERS`: Change the default threshold.
 
 ## Screenshot of the program
