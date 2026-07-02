@@ -6,7 +6,7 @@ Originally built for the 20R Gaming community.
 
 ## 🚀 Features
 * **Live Monitoring:** Polls the BattleMetrics API every 60 seconds to check current server population.
-* **Automated System Actions:** Choose to "Do Nothing", "Kill Process" (closes SquadGame.exe), or "Shutdown PC" when the target is hit.
+* **Automated System Actions:** Choose to "Do Nothing", "Kill Process" (closes SquadGame-Win64-Shipping.exe), or "Shutdown PC" when the target is hit.
 * **Clean UI:** Built with Tkinter for a lightweight, easy-to-read dashboard without needing to use the command line.
 
 ## 📥 For Regular Users (No Code Required)
