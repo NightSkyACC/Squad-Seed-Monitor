@@ -50,5 +50,6 @@ Open the Python file and edit the variables at the top of the script to match yo
 
  <img width="542" height="702" alt="image" src="https://github.com/user-attachments/assets/86b65744-985a-443e-95f3-7ac3b360bbfd" />
 
-
+##License
+   MIT — see **[LICENSE](../../LICENSE)**
 
