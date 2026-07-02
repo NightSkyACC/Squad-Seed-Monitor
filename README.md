@@ -51,6 +51,7 @@ Open the Python file and edit the variables at the top of the script to match yo
 
 ## Screenshot of the program
 <img width="542" height="682" alt="image" src="https://github.com/user-attachments/assets/aa2221fd-1b80-42e6-b580-2d346d716a6b" />
+ <img width="542" height="702" alt="image" src="https://github.com/user-attachments/assets/86b65744-985a-443e-95f3-7ac3b360bbfd" />
 
 
 
