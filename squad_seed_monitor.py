@@ -5,6 +5,10 @@ import webbrowser
 import os
 import ctypes
 import shutil
+import threading
+import queue
+import time
+import base64
 from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
 
 # --- Windows High DPI Fix ---
@@ -14,12 +18,101 @@ except Exception:
     pass
 
 # --- Configuration ---
-API_URL = "https://api.battlemetrics.com/servers/30558421"
+# Player counts now come from Epic Online Services (EOS) matchmaking, because
+# BattleMetrics moved its API behind a paywall.
+SERVER_HOST = "YOUR.SERVER.IP"   # Squad server IP / hostname (EOS ADDRESS_s filter)
+SERVER_PORT = 7787               # Squad GAME port (the connect port, NOT the query port)
 JOIN_URL = "https://jtp27622.pythonanywhere.com/join?id=109775241595442380"
 DISCORD_URL = "https://discord.gg/20R"
 TARGET_PLAYERS = 85
 BG_COLOR = "#4a235a"
 TEXT_COLOR = "white"
+
+# --- Squad EOS constants ---
+# Public client credentials and deployment ID, the same ones used by GameDig
+# (https://github.com/gamedig/node-gamedig/blob/master/protocols/squad.js)
+# and by the SquadSeed script by WASP103 (CC BY-SA 4.0).
+EOS_API = "https://api.epicgames.dev"
+EOS_CLIENT_ID = "xyza7891J7d3GU8ZIwCoC5xdBsdoqVWA"
+EOS_CLIENT_SECRET = "4SLVBqAm09q776SIlQRTD6moM/bnGAWhDSqOxJAIS0s"
+EOS_DEPLOYMENT_ID = "5dee4062a90b42cd98fcad618b6636c2"
+
+
+class EosClient:
+    """Minimal EOS matchmaking client: anonymous device-id login + server filter."""
+
+    def __init__(self):
+        self.token = None
+        self.expires_at = 0.0
+
+    def _basic_auth(self):
+        pair = f"{EOS_CLIENT_ID}:{EOS_CLIENT_SECRET}".encode("ascii")
+        return "Basic " + base64.b64encode(pair).decode("ascii")
+
+    def _authenticate(self):
+        basic = {"Authorization": self._basic_auth()}
+
+        # 1) Anonymous device id
+        r = requests.post(f"{EOS_API}/auth/v1/accounts/deviceid",
+                          headers=basic, data={"deviceModel": "PC"}, timeout=10)
+        r.raise_for_status()
+        device_token = r.json().get("access_token")
+        if not device_token:
+            raise RuntimeError("EOS device auth returned no access_token")
+
+        # 2) Exchange it for a deployment-scoped OAuth token
+        r = requests.post(f"{EOS_API}/auth/v1/oauth/token", headers=basic, data={
+            "grant_type": "external_auth",
+            "external_auth_type": "deviceid_access_token",
+            "external_auth_token": device_token,
+            "nonce": "SquadSeedMonitor",
+            "deployment_id": EOS_DEPLOYMENT_ID,
+            "display_name": "SquadSeed",
+        }, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        self.token = data.get("access_token")
+        if not self.token:
+            raise RuntimeError("EOS OAuth returned no access_token")
+        self.expires_at = time.time() + int(data.get("expires_in", 3600)) - 60
+
+    def _filter_sessions(self, host):
+        body = {"criteria": [{"key": "attributes.ADDRESS_s", "op": "EQUAL", "value": host}]}
+        return requests.post(
+            f"{EOS_API}/matchmaking/v1/{EOS_DEPLOYMENT_ID}/filter",
+            headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
+            json=body, timeout=10)
+
+    def get_players(self, host, port):
+        """Return the current player count of the Squad server at host:port."""
+        if not self.token or time.time() >= self.expires_at:
+            self._authenticate()
+
+        r = self._filter_sessions(host)
+        if r.status_code in (401, 403):  # token rejected -> log in again once
+            self._authenticate()
+            r = self._filter_sessions(host)
+        r.raise_for_status()
+
+        sessions = r.json().get("sessions") or []
+        if not sessions:
+            raise RuntimeError(f"No EOS sessions found for {host}")
+
+        bound_any = f"0.0.0.0:{port}"
+        bound_host = f"{host}:{port}"
+        for s in sessions:
+            attrs = s.get("attributes") or {}
+            bound = str(attrs.get("ADDRESSBOUND_s", ""))
+            game_port = attrs.get("GAMESERVER_PORT_l")
+            try:
+                game_port = int(game_port) if game_port is not None else None
+            except (TypeError, ValueError):
+                game_port = None
+            if bound in (bound_any, bound_host) or game_port == port:
+                return int(s.get("totalPlayers", 0))
+
+        raise RuntimeError(f"EOS session not found for {host}:{port}")
+
 
 class SeedTrackerApp:
     def __init__(self, root):
@@ -27,22 +120,27 @@ class SeedTrackerApp:
         self.root.title("20R Gaming | Stat Tracking | Discord.gg/20R")
         self.root.geometry("540x670")
         self.root.configure(bg=BG_COLOR)
-        
+
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.selected_action = tk.StringVar(value="Kill Process")
         self.selected_res = tk.StringVar(value="1024x768")
         self.selected_fps = tk.StringVar(value="30")
-        
+
         self.time_left = 60
         self.is_running = True
-        
+
+        self.eos = EosClient()
+        self.poll_queue = queue.Queue()
+        self.poll_in_flight = False
+
         self.backup_ini_path = None
         self.cleanup_orphan_backups()
 
         self.setup_ui()
         self.check_api()
         self.countdown()
+        self.drain_poll_queue()
 
     def cleanup_orphan_backups(self):
         paths = [
@@ -60,54 +158,52 @@ class SeedTrackerApp:
                     pass
 
     def setup_ui(self):
-        tk.Label(self.root, text="20R Gaming | Stat Tracking | Discord.gg/20R", 
+        tk.Label(self.root, text="20R Gaming | Stat Tracking | Discord.gg/20R",
                  font=("Segoe UI", 12, "bold"), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(15, 5))
 
-        self.btn_autoseed = tk.Button(self.root, text="🚀 1-Click Auto-Seed Sequence", 
-                                      font=("Segoe UI", 13, "bold"), bg="#27ae60", fg="white", 
+        self.btn_autoseed = tk.Button(self.root, text="🚀 1-Click Auto-Seed Sequence",
+                                      font=("Segoe UI", 13, "bold"), bg="#27ae60", fg="white",
                                       relief="flat", command=self.start_autoseed)
         self.btn_autoseed.pack(pady=(5, 0), fill=tk.X, padx=30)
-        
-        tk.Label(self.root, text="* You must physically click the screen once to skip the game intro *", 
+
+        tk.Label(self.root, text="* You must physically click the screen once to skip the game intro *",
                  font=("Segoe UI", 8, "italic"), bg=BG_COLOR, fg="#bdc3c7").pack(pady=(2, 5))
 
         btn_frame = tk.Frame(self.root, bg=BG_COLOR)
         btn_frame.pack(pady=5)
 
-        tk.Button(btn_frame, text="Manual Launch", font=("Segoe UI", 8, "bold"), 
+        tk.Button(btn_frame, text="Manual Launch", font=("Segoe UI", 8, "bold"),
                   bg="#95a5a6", fg="black", relief="flat", width=14,
                   command=lambda: webbrowser.open("steam://rungameid/393380")).grid(row=0, column=0, padx=5)
 
-        tk.Button(btn_frame, text="Manual Join", font=("Segoe UI", 8, "bold"), 
+        tk.Button(btn_frame, text="Manual Join", font=("Segoe UI", 8, "bold"),
                   bg="#3498db", fg="white", relief="flat", width=14,
                   command=lambda: webbrowser.open(JOIN_URL)).grid(row=0, column=1, padx=5)
-                  
-        tk.Button(btn_frame, text="Discord", font=("Segoe UI", 8, "bold"), 
+
+        tk.Button(btn_frame, text="Discord", font=("Segoe UI", 8, "bold"),
                   bg="#7289da", fg="white", relief="flat", width=14,
                   command=lambda: webbrowser.open(DISCORD_URL)).grid(row=0, column=2, padx=5)
 
         self.lbl_players = tk.Label(self.root, text="--", font=("Segoe UI", 65, "bold"), bg=BG_COLOR, fg=TEXT_COLOR)
         self.lbl_players.pack(pady=5)
 
-        tk.Label(self.root, text=f"Target: > {TARGET_PLAYERS} players", 
+        tk.Label(self.root, text=f"Target: > {TARGET_PLAYERS} players",
                  font=("Segoe UI", 11), bg=BG_COLOR, fg=TEXT_COLOR).pack()
 
-        self.lbl_status = tk.Label(self.root, text="Status: checking...", 
+        self.lbl_status = tk.Label(self.root, text="Status: checking...",
                                    font=("Segoe UI", 10), bg=BG_COLOR, fg="#2ecc71")
         self.lbl_status.pack(pady=2)
 
-        self.lbl_timer = tk.Label(self.root, text="Next check in -- s", 
+        self.lbl_timer = tk.Label(self.root, text="Next check in -- s",
                                   font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR)
         self.lbl_timer.pack(pady=2)
 
         # --- Seeding Tools Section ---
-        tk.Label(self.root, text="Seeding Optimization Tools:", 
+        tk.Label(self.root, text="Seeding Optimization Tools:",
                  font=("Segoe UI", 10, "bold"), bg=BG_COLOR, fg="#f1c40f").pack(pady=(15, 2))
-        
-        # ---> THE MISSING TEXT <---
-        tk.Label(self.root, text="* Apply Config BEFORE launching | Mute AFTER game is open *", 
+
+        tk.Label(self.root, text="* Apply Config BEFORE launching | Mute AFTER game is open *",
                  font=("Segoe UI", 9, "italic"), bg=BG_COLOR, fg="#bdc3c7").pack(pady=(0, 5))
-        # --------------------------
 
         tools_frame = tk.Frame(self.root, bg=BG_COLOR)
         tools_frame.pack()
@@ -123,7 +219,7 @@ class SeedTrackerApp:
         opt_res.config(bg="#95a5a6", fg="black", font=("Segoe UI", 8, "bold"), relief="flat", highlightthickness=0)
         opt_res.pack(side=tk.LEFT, padx=2)
 
-        fps_opts = ["5", "15", "30", "60", "120", "144"] 
+        fps_opts = ["5", "15", "30", "60", "120", "144"]
         opt_fps = tk.OptionMenu(config_frame, self.selected_fps, *fps_opts)
         opt_fps.config(bg="#95a5a6", fg="black", font=("Segoe UI", 8, "bold"), relief="flat", highlightthickness=0)
         opt_fps.pack(side=tk.LEFT, padx=2)
@@ -132,9 +228,9 @@ class SeedTrackerApp:
         self.btn_fps.pack(side=tk.LEFT, padx=2)
 
         # Action Buttons Area
-        tk.Label(self.root, text="When threshold is reached:", 
+        tk.Label(self.root, text="When threshold is reached:",
                  font=("Segoe UI", 10), bg=BG_COLOR, fg=TEXT_COLOR).pack(pady=(15, 5))
-        
+
         action_frame = tk.Frame(self.root, bg=BG_COLOR)
         action_frame.pack()
 
@@ -169,14 +265,14 @@ class SeedTrackerApp:
                 if session.Process and session.Process.name() == "SquadGame-Win64-Shipping.exe":
                     volume.SetMute(1, None)
                     muted = True
-            
+
             if muted:
                 self.btn_autoseed.config(text="Game Booted & Muted! Waiting 15s...")
                 self.btn_mute.config(bg="#2ecc71", text="Game Muted!")
                 self.root.after(15000, self.autoseed_step3)
             else:
                 self.poll_audio_attempts += 1
-                if self.poll_audio_attempts > 60: 
+                if self.poll_audio_attempts > 60:
                     self.btn_autoseed.config(text="Error: Game took too long", bg="#e74c3c")
                     return
                 self.btn_autoseed.config(text=f"Waiting for Game to boot... ({self.poll_audio_attempts})")
@@ -198,7 +294,7 @@ class SeedTrackerApp:
                 if session.Process and session.Process.name() == "SquadGame-Win64-Shipping.exe":
                     volume.SetMute(1, None)
                     muted = True
-            
+
             if muted:
                 self.btn_mute.config(bg="#2ecc71", text="Game Muted!")
             else:
@@ -211,7 +307,7 @@ class SeedTrackerApp:
             path1 = os.path.join(os.environ['LOCALAPPDATA'], 'SquadGame', 'Saved', 'Config', 'WindowsNoEditor', 'GameUserSettings.ini')
             path2 = os.path.join(os.environ['LOCALAPPDATA'], 'Squad', 'Saved', 'Config', 'WindowsNoEditor', 'GameUserSettings.ini')
             path3 = os.path.join(os.environ['LOCALAPPDATA'], 'SquadGame', 'Saved', 'Config', 'Windows', 'GameUserSettings.ini')
-            
+
             ini_path = None
             if os.path.exists(path1):
                 ini_path = path1
@@ -219,7 +315,7 @@ class SeedTrackerApp:
                 ini_path = path2
             elif os.path.exists(path3):
                 ini_path = path3
-                
+
             if not ini_path:
                 self.btn_fps.config(bg="#f39c12", text="Select Config...")
                 ini_path = filedialog.askopenfilename(
@@ -253,7 +349,7 @@ class SeedTrackerApp:
                         f.write(f'FrameRateLimit={target_fps}.000000\n')
                     else:
                         f.write(line)
-            
+
             self.btn_fps.config(bg="#2ecc71", text="Applied!")
         except Exception as e:
             print(f"Config error: {e}")
@@ -269,6 +365,7 @@ class SeedTrackerApp:
                 print(f"Restore failed: {e}")
 
     def on_closing(self):
+        self.is_running = False
         self.restore_settings()
         self.root.destroy()
 
@@ -277,53 +374,74 @@ class SeedTrackerApp:
         self.btn_nothing.config(bg="#34495e", fg="white")
         self.btn_kill.config(bg="#34495e", fg="white")
         self.btn_shutdown.config(bg="#34495e", fg="white")
-        
+
         if action == "Do Nothing": self.btn_nothing.config(bg="#2ecc71", fg="black")
         elif action == "Kill Process": self.btn_kill.config(bg="#2ecc71", fg="black")
         elif action == "Shutdown PC": self.btn_shutdown.config(bg="#2ecc71", fg="black")
 
+    # --- Player count polling (EOS) ---
     def check_api(self):
-        if not self.is_running: return
-        try:
-            response = requests.get(API_URL, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                players = data['data']['attributes']['players']
-                self.lbl_players.config(text=str(players))
-                self.lbl_status.config(text="Status: online", fg="#2ecc71")
-                
-                if players >= TARGET_PLAYERS:
-                    self.trigger_action()
-            else:
-                self.lbl_status.config(text="Status: error", fg="#e74c3c")
-        except Exception:
-            self.lbl_status.config(text="Status: offline", fg="#e74c3c")
-        
+        """Kick off an EOS lookup in a background thread so the UI never freezes."""
+        if not self.is_running:
+            return
         self.time_left = 60
+        if self.poll_in_flight:
+            return
+        self.poll_in_flight = True
+        threading.Thread(target=self._poll_worker, daemon=True).start()
+
+    def _poll_worker(self):
+        try:
+            players = self.eos.get_players(SERVER_HOST, SERVER_PORT)
+            self.poll_queue.put(("ok", players))
+        except Exception as e:
+            self.poll_queue.put(("err", str(e)))
+
+    def drain_poll_queue(self):
+        """Apply finished poll results on the Tk thread."""
+        if not self.is_running:
+            return
+        try:
+            while True:
+                kind, value = self.poll_queue.get_nowait()
+                self.poll_in_flight = False
+                if kind == "ok":
+                    self.lbl_players.config(text=str(value))
+                    self.lbl_status.config(text="Status: online", fg="#2ecc71")
+                    if value >= TARGET_PLAYERS:
+                        self.trigger_action()
+                        return
+                else:
+                    print(f"EOS error: {value}")
+                    self.lbl_status.config(text="Status: error (see console)", fg="#e74c3c")
+        except queue.Empty:
+            pass
+        self.root.after(250, self.drain_poll_queue)
 
     def countdown(self):
         if not self.is_running: return
-        
+
         self.lbl_timer.config(text=f"Next check in {self.time_left} s")
         if self.time_left <= 0:
             self.check_api()
         else:
             self.time_left -= 1
-            
+
         self.root.after(1000, self.countdown)
 
     def trigger_action(self):
         self.is_running = False
         self.lbl_timer.config(text="THRESHOLD REACHED!", fg="#f1c40f")
         self.lbl_status.config(text="Executing Action...", fg="#f1c40f")
-        
+
         self.restore_settings()
-        
+
         action = self.selected_action.get()
         if action == "Kill Process":
             os.system("taskkill /F /IM SquadGame-Win64-Shipping.exe")
         elif action == "Shutdown PC":
             os.system("shutdown /s /t 10")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
