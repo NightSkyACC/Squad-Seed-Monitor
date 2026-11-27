@@ -15,7 +15,7 @@ Originally built for the 20R Gaming community.
 ## 📥 For Regular Users (No Code Required)
 If you just want to use the tool, you don't need to install Python or know how to code. 
 1. Go to the **[Releases](../../releases)** page on the right side of this repository.
-2. Download the latest `Squad seed monitor.exe` file (V2.0.0 or newer).
+2. Download the latest `Squad seed monitor.exe` file (V3.0.0 or newer).
 3. Run the program, select your target FPS, and click the big green **1-Click Auto-Seed** button!
 
 ## 💻 For Developers & Server Admins
