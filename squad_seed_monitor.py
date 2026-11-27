@@ -20,8 +20,8 @@ except Exception:
 # --- Configuration ---
 # Player counts now come from Epic Online Services (EOS) matchmaking, because
 # BattleMetrics moved its API behind a paywall.
-SERVER_HOST = "YOUR.SERVER.IP"   # Squad server IP / hostname (EOS ADDRESS_s filter)
-SERVER_PORT = 7787               # Squad GAME port (the connect port, NOT the query port)
+SERVER_HOST = "37.202.197.75"      # Squad server IP / hostname (EOS ADDRESS_s filter)
+SERVER_PORT = 10272               # Squad GAME port (the connect port, NOT the query port 10274)
 JOIN_URL = "https://jtp27622.pythonanywhere.com/join?id=109775241595442380"
 DISCORD_URL = "https://discord.gg/20R"
 TARGET_PLAYERS = 85
